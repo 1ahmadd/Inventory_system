@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { KeyRound, Plus, ShieldCheck, Trash2, UserRound, Users as UsersIcon } from "lucide-react";
 import { toast } from "sonner";
-import { createUser, deleteUser, listUsers, updateUserPassword, type AuthUser, type UserRole } from "../lib/authClient";
+import { createUser, deleteUser, listUsers, updateUserPassword, listAudit, type AuthUser, type UserRole, type AuditLog } from "../lib/authClient";
 
 const formatCreated = (value: string) => {
   try {
@@ -188,4 +188,11 @@ export default function UsersView({ currentUser }: { currentUser: AuthUser }) {
       </div>
     </>
   );
+}
+
+export function AuditView() {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { listAudit().then((res) => setLogs(res.logs)).catch((error) => toast.error(error instanceof Error ? error.message : "تعذر تحميل السجل")).finally(() => setLoading(false)); }, []);
+  return <section className="panel audit-card"><div className="panel-heading"><div><span className="eyebrow">للمدير فقط</span><h3>سجل العمليات</h3></div><ShieldCheck size={20} /></div>{loading ? <p className="field-help">جارِ تحميل السجل…</p> : <div className="apartments-table-wrap"><table className="data-table"><thead><tr><th>التاريخ</th><th>المستخدم</th><th>العملية</th><th>التفاصيل</th></tr></thead><tbody>{logs.length ? logs.map((log) => <tr key={log.id}><td>{formatCreated(log.createdAt)}</td><td><b>{log.username}</b></td><td>{log.action}</td><td>{log.details || "—"}</td></tr>) : <tr><td colSpan={4}>لا توجد عمليات مسجلة بعد.</td></tr>}</tbody></table></div>}</section>;
 }

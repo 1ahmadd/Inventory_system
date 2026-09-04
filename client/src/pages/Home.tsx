@@ -28,8 +28,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import UsersView from "./Users";
-import type { AuthUser } from "../lib/authClient";
+import UsersView, { AuditView } from "./Users";
+import { fetchInventory, saveInventory, type AuthUser } from "../lib/authClient";
 
 type ApartmentStatus = "شاغرة" | "مسكونة" | "قيد الصيانة";
 type ItemCondition = "ممتاز" | "جيد" | "يحتاج صيانة" | "تالف" | "مفقود";
@@ -50,6 +50,8 @@ type InventoryItem = {
   name: string;
   quantity: number;
   condition: ItemCondition;
+  amount?: number;
+  depreciationRate?: number;
   notes: string;
   updatedAt: string;
 };
@@ -60,7 +62,7 @@ type AppState = {
   items: InventoryItem[];
 };
 
-type View = "dashboard" | "apartments" | "inventory" | "users" | "settings";
+type View = "dashboard" | "apartments" | "inventory" | "users" | "audit" | "settings";
 
 const STORAGE_KEY = "doctor-apartment-inventory-v1";
 const logoUrl = "/assets/logo.png";
@@ -155,6 +157,7 @@ const viewEyebrow: Record<View, string> = {
   apartments: "إدارة الوحدات",
   inventory: "سجل العهد والمحتويات",
   users: "الأمان والوصول",
+  audit: "المراجعة والامتثال",
   settings: "مساحة العمل",
 };
 
@@ -163,11 +166,13 @@ const viewTitle: Record<View, string> = {
   apartments: "الشقق والوحدات",
   inventory: "سجل القطع والموجودات",
   users: "المستخدمون والصلاحيات",
+  audit: "سجل عمليات النظام",
   settings: "الإعدادات والنسخ الاحتياطي",
 };
 
 export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [state, setState] = useState<AppState>(() => loadState());
+  const [serverLoaded, setServerLoaded] = useState(false);
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [selectedApartmentId, setSelectedApartmentId] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -182,7 +187,15 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    if (serverLoaded) void saveInventory(state as never).catch(() => toast.error("تعذر حفظ التعديلات على الخادم"));
+  }, [serverLoaded, state]);
+
+  useEffect(() => {
+    void fetchInventory().then(({ state: remote }) => {
+      const hasRemoteData = (remote.apartments?.length || 0) > 0 || (remote.items?.length || 0) > 0;
+      if (hasRemoteData || (state.apartments.length === 0 && state.items.length === 0)) setState({ buildingName: remote.buildingName, apartments: (remote.apartments || []) as Apartment[], items: (remote.items || []) as InventoryItem[] });
+    }).catch(() => toast.error("تعذر تحميل السجل المركزي")).finally(() => setServerLoaded(true));
+  }, []);
 
   const selectedApartment = state.apartments.find((apartment) => apartment.id === selectedApartmentId) ?? state.apartments[0];
   const filteredItems = useMemo(() => {
@@ -327,6 +340,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
           <NavItem active={activeView === "apartments"} icon={<Building2 size={18} />} label="الشقق" count={state.apartments.length} onClick={() => navigate("apartments")} />
           <NavItem active={activeView === "inventory"} icon={<ClipboardList size={18} />} label="سجل القطع" count={state.items.length} onClick={() => navigate("inventory")} />
           {user.role === "admin" && <NavItem active={activeView === "users"} icon={<UsersIcon size={18} />} label="المستخدمون" onClick={() => navigate("users")} />}
+          {user.role === "admin" && <NavItem active={activeView === "audit"} icon={<ClipboardList size={18} />} label="سجل العمليات" onClick={() => navigate("audit")} />}
           <NavItem active={activeView === "settings"} icon={<Settings2 size={18} />} label="الإعدادات والنسخ" onClick={() => navigate("settings")} />
         </nav>
         <button type="button" className="nav-item" onClick={onLogout} aria-label="تسجيل الخروج">
@@ -409,6 +423,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
             />
           )}
           {activeView === "users" && user.role === "admin" && <UsersView currentUser={user} />}
+          {activeView === "audit" && user.role === "admin" && <AuditView />}
           {activeView === "settings" && (
             <SettingsView
               buildingName={state.buildingName}
@@ -522,14 +537,14 @@ function InventoryView({ apartments, items, selectedApartmentId, setSelectedApar
 }
 
 function InventoryCard({ item, apartment, onEdit, onDelete }: { item: InventoryItem; apartment?: Apartment; onEdit: () => void; onDelete: () => void }) {
-  return <article className={`inventory-card border-${conditionTone(item.condition)}`}><div className="inventory-card-main"><div className="inventory-card-top"><span className="category-tag">{item.category}</span><span className={`status-pill ${conditionTone(item.condition)}`}>{item.condition}</span></div><h3>{item.name}</h3><div className="inventory-card-meta"><span><Building2 size={14} /> شقة {apartment?.number || "غير محددة"}</span><span><Archive size={14} /> الكمية: {item.quantity}</span></div>{item.notes && <p className="inventory-note">{item.notes}</p>}</div><div className="inventory-card-actions"><IconButton label="تعديل القطعة" onClick={onEdit}><Pencil size={16} /></IconButton><IconButton label="حذف القطعة" onClick={onDelete}><Trash2 size={16} /></IconButton></div></article>;
+  return <article className={`inventory-card border-${conditionTone(item.condition)}`}><div className="inventory-card-main"><div className="inventory-card-top"><span className="category-tag">{item.category}</span><span className={`status-pill ${conditionTone(item.condition)}`}>{item.condition}</span></div><h3>{item.name}</h3><div className="inventory-card-meta"><span><Building2 size={14} /> شقة {apartment?.number || "غير محددة"}</span><span><Archive size={14} /> الكمية: {item.quantity}</span>{item.amount != null && <span>المبلغ: {item.amount.toLocaleString("ar-EG")}</span>}{item.depreciationRate != null && <span>الإهلاك: {item.depreciationRate}%</span>}</div>{item.notes && <p className="inventory-note">{item.notes}</p>}</div><div className="inventory-card-actions"><IconButton label="تعديل القطعة" onClick={onEdit}><Pencil size={16} /></IconButton><IconButton label="حذف القطعة" onClick={onDelete}><Trash2 size={16} /></IconButton></div></article>;
 }
 
 function SettingsView({ buildingName, onBuildingNameChange, onExport, onImport, onPrint }: { buildingName: string; onBuildingNameChange: (value: string) => void; onExport: () => void; onImport: () => void; onPrint: () => void }) {
   return <>
-    <div className="page-intro"><div><p className="page-lede">تعمل دون خادم</p><h2>الإعدادات والنسخ</h2><p>البيانات تحفظ داخل المتصفح على الجهاز. استخدم JSON لعمل نسخة احتياطية أو لنقل السجل إلى جهاز آخر.</p></div></div>
+    <div className="page-intro"><div><p className="page-lede">سجل مرتبط بالمستخدم</p><h2>الإعدادات والنسخ</h2><p>يحفظ السجل مركزيًا لكل مستخدم مع نسخة محلية مؤقتة. استخدم JSON لعمل نسخة احتياطية أو لنقل السجل إلى جهاز آخر.</p></div></div>
     <div className="settings-grid"><section className="panel settings-card"><div className="panel-heading"><div><span className="eyebrow">هوية النموذج</span><h3>بيانات المبنى</h3></div><Building2 size={21} /></div><label className="field-label" htmlFor="building-name">اسم المبنى</label><input id="building-name" className="text-input" value={buildingName} onChange={(event) => onBuildingNameChange(event.target.value)} placeholder="مثال: مبنى الأطباء - 1" /><p className="field-help">سيظهر هذا الاسم في واجهة النظام ونموذج الطباعة.</p></section><section className="panel settings-card"><div className="panel-heading"><div><span className="eyebrow">حماية بياناتك</span><h3>نسخة احتياطية</h3></div><Archive size={21} /></div><div className="settings-actions"><button type="button" className="button dark" onClick={onExport}><FileDown size={17} /> تصدير JSON</button><button type="button" className="button outline" onClick={onImport}><ArrowDownToLine size={17} /> استيراد JSON</button><button type="button" className="button outline" onClick={onPrint}><Printer size={17} /> طباعة سجل A4</button></div><div className="backup-note"><Sparkles size={16} /><span>نصيحة: صدّر نسخة بعد كل جولة جرد واحتفظ بها في ملفات الهاتف.</span></div></section></div>
-    <section className="panel local-panel"><div className="local-icon"><Check size={20} /></div><div><h3>وضع التشغيل المحلي مفعل</h3><p>لا يتم إرسال بيانات الشقق أو الأطباء إلى أي خادم. عند حذف بيانات المتصفح قد تفقد السجل، لذلك تبقى نسخة JSON الاحتياطية مهمة.</p></div></section>
+    <section className="panel local-panel"><div className="local-icon"><Check size={20} /></div><div><h3>الحفظ المركزي مفعل</h3><p>بيانات هذا المستخدم محفوظة على الخادم، مع نسخة محلية مؤقتة لتحسين سرعة الاستخدام. تبقى نسخة JSON الاحتياطية مهمة.</p></div></section>
   </>;
 }
 
@@ -551,8 +566,10 @@ function ItemModal({ initial, apartments, defaultApartmentId, onClose, onSave }:
   const [name, setName] = useState(initial?.name || "");
   const [quantity, setQuantity] = useState(String(initial?.quantity || 1));
   const [condition, setCondition] = useState<ItemCondition>(initial?.condition || "جيد");
+  const [amount, setAmount] = useState(String(initial?.amount ?? ""));
+  const [depreciationRate, setDepreciationRate] = useState(String(initial?.depreciationRate ?? ""));
   const [notes, setNotes] = useState(initial?.notes || "");
-  return <Modal eyebrow={initial ? "تعديل السجل" : "إضافة إلى الجرد"} title={initial ? "تعديل بيانات القطعة" : "إضافة قطعة جديدة"} onClose={onClose}><form className="form-stack" onSubmit={(event) => { event.preventDefault(); if (!name.trim() || !apartmentId) { toast.error("اختر الشقة وأدخل اسم القطعة"); return; } onSave({ apartmentId, category, name: name.trim(), quantity: Math.max(1, Number(quantity) || 1), condition, notes: notes.trim() }); }}><label className="field-label">الشقة<select autoFocus className="text-input" value={apartmentId} onChange={(event) => setApartmentId(event.target.value)}>{apartments.map((apartment) => <option key={apartment.id} value={apartment.id}>شقة {apartment.number}</option>)}</select></label><div className="form-grid"><label className="field-label">الفئة<select className="text-input" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label><label className="field-label">الكمية<input className="text-input" type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label></div><label className="field-label">اسم القطعة أو وصفها<input className="text-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="مثال: سرير مفرد، غلاية ماء، ستارة..." /></label><label className="field-label">الحالة<select className="text-input" value={condition} onChange={(event) => setCondition(event.target.value as ItemCondition)}>{itemConditions.map((item) => <option key={item}>{item}</option>)}</select></label><label className="field-label">ملاحظات<textarea className="text-input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="الماركة، رقم الأصل، النقص أو العطل" /></label><div className="modal-actions"><button type="button" className="button outline" onClick={onClose}>إلغاء</button><button type="submit" className="button primary"><Check size={17} /> حفظ القطعة</button></div></form></Modal>;
+  return <Modal eyebrow={initial ? "تعديل السجل" : "إضافة إلى الجرد"} title={initial ? "تعديل بيانات القطعة" : "إضافة قطعة جديدة"} onClose={onClose}><form className="form-stack" onSubmit={(event) => { event.preventDefault(); if (!name.trim() || !apartmentId) { toast.error("اختر الشقة وأدخل اسم القطعة"); return; } onSave({ apartmentId, category, name: name.trim(), quantity: Math.max(1, Number(quantity) || 1), condition, amount: amount === "" ? undefined : Math.max(0, Number(amount) || 0), depreciationRate: depreciationRate === "" ? undefined : Math.min(100, Math.max(0, Number(depreciationRate) || 0)), notes: notes.trim() }); }}><label className="field-label">الشقة<select autoFocus className="text-input" value={apartmentId} onChange={(event) => setApartmentId(event.target.value)}>{apartments.map((apartment) => <option key={apartment.id} value={apartment.id}>شقة {apartment.number}</option>)}</select></label><div className="form-grid"><label className="field-label">الفئة<select className="text-input" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label><label className="field-label">الكمية<input className="text-input" type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label></div><label className="field-label">اسم القطعة أو وصفها<input className="text-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="مثال: سرير مفرد، غلاية ماء، ستارة..." /></label><div className="form-grid"><label className="field-label">المبلغ (اختياري)<input className="text-input" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="مثال: 1250" /></label><label className="field-label">نسبة الإهلاك % (اختياري)<input className="text-input" type="number" min="0" max="100" step="0.01" value={depreciationRate} onChange={(event) => setDepreciationRate(event.target.value)} placeholder="مثال: 10" /></label></div><label className="field-label">الحالة<select className="text-input" value={condition} onChange={(event) => setCondition(event.target.value as ItemCondition)}>{itemConditions.map((item) => <option key={item}>{item}</option>)}</select></label><label className="field-label">ملاحظات<textarea className="text-input textarea" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="الماركة، رقم الأصل، النقص أو العطل" /></label><div className="modal-actions"><button type="button" className="button outline" onClick={onClose}>إلغاء</button><button type="submit" className="button primary"><Check size={17} /> حفظ القطعة</button></div></form></Modal>;
 }
 
 function PrintSheet({ state, apartmentId }: { state: AppState; apartmentId: string }) {
@@ -560,10 +577,10 @@ function PrintSheet({ state, apartmentId }: { state: AppState; apartmentId: stri
   const apartmentItems = state.items.filter((item) => item.apartmentId === apartment?.id);
   const grouped = groupByCategory(apartmentItems);
   let serial = 0;
-  return <div className="print-only"><div className="print-header"><div><h1>{state.buildingName}</h1><h2>نموذج جرد أثاث ومحتويات شقة</h2></div><div className="print-logo-box"><img src={logoUrl} alt="" /></div></div><div className="print-meta"><div><b>رقم الشقة</b><span>{apartment?.number || "—"}</span></div><div><b>الطبيب المقيم</b><span>{apartment?.doctor || "—"}</span></div><div><b>حالة الشقة</b><span>{apartment?.status || "—"}</span></div><div><b>تاريخ الطباعة</b><span>{formatDate(nowIso())}</span></div></div><table><thead><tr><th>م</th><th>الفئة</th><th>البيان / القطعة</th><th>العدد</th><th>الحالة</th><th>الملاحظات</th></tr></thead><tbody>{grouped.length ? grouped.map((group) => (
+  return <div className="print-only"><div className="print-header"><div><h1>{state.buildingName}</h1><h2>نموذج جرد أثاث ومحتويات شقة</h2></div><div className="print-logo-box"><img src={logoUrl} alt="" /></div></div><div className="print-meta"><div><b>رقم الشقة</b><span>{apartment?.number || "—"}</span></div><div><b>الطبيب المقيم</b><span>{apartment?.doctor || "—"}</span></div><div><b>حالة الشقة</b><span>{apartment?.status || "—"}</span></div><div><b>تاريخ الطباعة</b><span>{formatDate(nowIso())}</span></div></div><table><thead><tr><th>م</th><th>الفئة</th><th>البيان / القطعة</th><th>العدد</th><th>الحالة</th><th>المبلغ</th><th>الإهلاك</th><th>الملاحظات</th></tr></thead><tbody>{grouped.length ? grouped.map((group) => (
     <>
-      <tr className="print-cat-row" key={`cat-${group.category}`}><td colSpan={6}>فئة: {group.category} — {group.items.length} سجل · إجمالي الكمية {group.totalQuantity}</td></tr>
-      {group.items.map((item) => { serial += 1; return <tr key={item.id}><td>{serial}</td><td>{item.category}</td><td>{item.name}</td><td>{item.quantity}</td><td>{item.condition}</td><td>{item.notes || ""}</td></tr>; })}
+      <tr className="print-cat-row" key={`cat-${group.category}`}><td colSpan={8}>فئة: {group.category} — {group.items.length} سجل · إجمالي الكمية {group.totalQuantity}</td></tr>
+      {group.items.map((item) => { serial += 1; return <tr key={item.id}><td>{serial}</td><td>{item.category}</td><td>{item.name}</td><td>{item.quantity}</td><td>{item.condition}</td><td>{item.amount == null ? "—" : item.amount.toLocaleString("ar-EG")}</td><td>{item.depreciationRate == null ? "—" : `${item.depreciationRate}%`}</td><td>{item.notes || ""}</td></tr>; })}
     </>
-  )) : <tr><td colSpan={6} className="print-empty">لا توجد قطع مسجلة لهذه الشقة</td></tr>}</tbody></table><div className="print-notes"><b>ملاحظات عامة</b><p>{apartment?.notes || ""}</p></div><div className="print-signatures"><span>توقيع المستلم: ____________________</span><span>توقيع لجنة الجرد: ____________________</span></div><div className="print-footer">نظام سجل الميدان · مرتب حسب الفئات · صفحة <span className="page-number" /></div></div>;
+  )) : <tr><td colSpan={8} className="print-empty">لا توجد قطع مسجلة لهذه الشقة</td></tr>}</tbody></table><div className="print-notes"><b>ملاحظات عامة</b><p>{apartment?.notes || ""}</p></div><div className="print-signatures"><span>توقيع المستلم: ____________________</span><span>توقيع لجنة الجرد: ____________________</span></div><div className="print-footer">نظام سجل الميدان · مرتب حسب الفئات · صفحة <span className="page-number" /></div></div>;
 }

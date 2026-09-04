@@ -3,6 +3,7 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createAuthRouter } from "./auth";
+import { createInventoryRouter } from "./inventory";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +14,7 @@ async function startServer() {
 
   // واجهات المصادقة وإدارة المستخدمين (قبل الملفات الثابتة)
   app.use(createAuthRouter());
+  app.use(createInventoryRouter());
 
   // Serve static files from dist/public in production
   const staticPath =

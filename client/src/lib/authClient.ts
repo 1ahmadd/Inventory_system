@@ -54,3 +54,9 @@ export const updateUserPassword = (id: string, password: string) =>
   request<{ ok: boolean }>(`/api/users/${id}/password`, { method: "PATCH", body: JSON.stringify({ password }) });
 
 export const deleteUser = (id: string) => request<{ ok: boolean }>(`/api/users/${id}`, { method: "DELETE" });
+
+export type InventoryState = { buildingName: string; apartments: unknown[]; items: unknown[] };
+export type AuditLog = { id: string; username: string; action: string; entity: string; details?: string; createdAt: string };
+export const fetchInventory = () => request<{ ok: boolean; state: InventoryState }>("/api/inventory");
+export const saveInventory = (state: InventoryState) => request<{ ok: boolean; state: InventoryState }>("/api/inventory", { method: "PUT", body: JSON.stringify({ state }) });
+export const listAudit = () => request<{ ok: boolean; logs: AuditLog[] }>("/api/audit");

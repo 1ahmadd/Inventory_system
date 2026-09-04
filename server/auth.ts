@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import fs from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { listAudit, recordAudit } from "./auditStore";
 
 // =============================================================================
 // نظام المصادقة: مستخدم/كلمة مرور + رمز تأكيد يُرسل إلى بريد Gmail معتمد
@@ -113,7 +114,7 @@ async function sendOtpEmail(code: string, username: string): Promise<boolean> {
   return true;
 }
 
-type AuthedRequest = Request & { user?: StoredUser; token?: string };
+export type AuthedRequest = Request & { user?: StoredUser; token?: string };
 
 function attachUser(req: AuthedRequest): StoredUser | null {
   const header = req.headers.authorization || "";
@@ -128,7 +129,7 @@ function attachUser(req: AuthedRequest): StoredUser | null {
   return user;
 }
 
-function authRequired(req: AuthedRequest, res: Response, next: NextFunction) {
+export function authRequired(req: AuthedRequest, res: Response, next: NextFunction) {
   if (!attachUser(req)) {
     res.status(401).json({ error: "الجلسة غير صالحة، سجّل الدخول من جديد" });
     return;
@@ -136,7 +137,7 @@ function authRequired(req: AuthedRequest, res: Response, next: NextFunction) {
   next();
 }
 
-function adminRequired(req: AuthedRequest, res: Response, next: NextFunction) {
+export function adminRequired(req: AuthedRequest, res: Response, next: NextFunction) {
   const user = attachUser(req);
   if (!user) {
     res.status(401).json({ error: "الجلسة غير صالحة، سجّل الدخول من جديد" });
@@ -263,6 +264,7 @@ export function createAuthRouter() {
     };
     users.push(newUser);
     saveUsers(users);
+    recordAudit(req, "إضافة مستخدم", "user", newUser.id, `الحساب: ${newUser.username}`);
     res.status(201).json({ ok: true, user: publicUser(newUser) });
   });
 
@@ -288,6 +290,7 @@ export function createAuthRouter() {
     target.salt = randomBytes(16).toString("hex");
     target.passwordHash = hashPassword(newPassword, target.salt);
     saveUsers(users);
+    recordAudit(req, "تغيير كلمة مرور", "user", target.id, `الحساب: ${target.username}`);
     // إبطال كل جلسات المستخدم المعدّل (مع إبقاء جلسة المدير الحالية إن عدّل نفسه)
     saveSessions(loadSessions().filter((item) => item.userId !== targetId || (isSelf && item.token === req.token)));
     res.json({ ok: true });
@@ -311,6 +314,7 @@ export function createAuthRouter() {
     }
     saveUsers(users.filter((item) => item.id !== targetId));
     saveSessions(loadSessions().filter((item) => item.userId !== targetId));
+    recordAudit(req, "حذف مستخدم", "user", target.id, `الحساب: ${target.username}`);
     res.json({ ok: true });
   });
 
